@@ -1,145 +1,84 @@
 # DOI Metadata Extractor
 
-R script for extracting comprehensive publication metadata from DOIs for systematic reviews and meta-analyses.
+Minimal R scripts for extracting publication metadata from DOIs with complete reliance on OpenAlex for article details, institution locations, and author affiliations.
 
-## What it extracts
+## What you get
 
-For each DOI, get:
-- **Publication year** and **journal name**
-- **ISSN**
-- **SJR** (Scimago Journal Rank) - free alternative to Impact Factor
-- **Corresponding author country** - extracted from affiliations (40-75% coverage depending on data availability)
-- **TOP Factor** - journal transparency score (0-29) from Center for Open Science
+For each DOI, `process_dois()` returns:
+- Publication year and journal title (from OpenAlex host venue metadata)
+- ISSN (primary plus optional vector of alternates)
+- Scimago Journal Rank (matched on ISSN/year via `sjrdata`)
+- TOP Factor (if `top_factor_data.RData` has been downloaded)
+- The OpenAlex `primary_topic` field (full object, plus display name and id helpers)
+- Two country columns:
+  - `article_location` – country of the article-level institution (first author affiliation)
+  - `author_location` – country of the author-profile institution (first, then last author fallback)
+- Optional detailed columns describing both locations (`return_location_details = TRUE`)
 
-## Quick Start
-
-### 1. Install packages
+## Quick start
 
 ```r
 if (!require("pacman")) install.packages("pacman")
-pacman::p_load(rcrossref, sjrdata, countrycode, httr, rjson, dplyr, stringr)
-```
+pacman::p_load(httr, countrycode, dplyr, sjrdata)
 
-### 2. Download TOP Factor data (one-time)
-
-```r
-source("download_top_factor.R")
-```
-
-### 3. Extract metadata
-
-```r
+source("download_top_factor.R")   # one-time setup (optional but recommended)
 source("extract_doi_metadata.R")
 
-# Your DOIs
 my_dois <- c(
-  "10.1177/1745691620950684",
-  "10.1111/bjso.12804",
-  "10.1037/pspi0000504"
+  "10.1037/amp0001385",
+  "10.1037/met0000351",
+  "10.1146/annurev-psych-020821-114157"
 )
 
-# Extract metadata
-results <- process_dois(my_dois)
-
-# Save results
+results <- process_dois(my_dois, return_location_details = FALSE)
 write.csv(results, "results.csv", row.names = FALSE)
 ```
 
-## Example output
+## Suggested manual test
 
-Tested with 10 diverse DOIs (psychology, medicine, philosophy, Danish, French, Indonesian journals, preprint, book chapter, old paper from 1974):
+After sourcing `extract_doi_metadata.R`, run:
 
+```r
+test_dois <- c(
+  "10.1037/amp0001385",
+  "10.1037/met0000351",
+  "10.3389/fpsyg.2022.896741"
+)
+
+process_dois(test_dois, return_location_details = TRUE)
 ```
-Total DOIs: 10
-Years found: 10 (100%)
-Journals found: 9 (90%)
-SJR found: 5 (50%)
-Countries found: 4 (40%)
-TOP Factor found: 4 (40%)
-```
 
-Sample results:
-
-| DOI | Year | Journal | SJR | Country | TOP |
-|-----|------|---------|-----|---------|-----|
-| 10.1177/1745691620950684 | 2021 | Perspectives on Psychological Science | 4.563 | United States | 0 |
-| 10.1111/bjso.12804 | 2025 | British Journal of Social Psychology | 1.665 | France | 10 |
-| 10.1136/bmj.3.5932.655 | 1974 | BMJ | NA | NA | NA |
-| 10.7146/ln.v0i1.19000 | 1994 | LexicoNordica | NA | NA | NA |
+Expect both `article_location` and `author_location` to be populated with country names, with `author_location_detail_source` showing `author-profile` when profile data was available; `article_location_label` and `author_location_label` (present when `return_location_details = TRUE`) contain the full institution strings.
 
 ## How it works
 
-### Country extraction
+1. **OpenAlex Works API** supplies publication metadata, host venue, location-rich authorship information, and the primary topic.
+2. **Institution choice** – the first author’s article-level institution is treated as the canonical article location; generic department names are skipped.
+3. **Author affiliation** – the first author’s profile is queried for current or most recent institutions, backed off to the last author, then to article metadata when necessary.
+4. **Metrics** – SJR values are pulled from `sjrdata`, while TOP Factor scores are matched against the optional download file.
 
-Uses pattern matching to identify countries from affiliation text:
-- ✅ US state names and abbreviations
-- ✅ Major universities (Harvard, Oxford, Peking, etc.)
-- ✅ Country names and common abbreviations (USA, UK, etc.)
-- ✅ Checks all authors (not just first)
+## Repository layout
 
-**Coverage:** 40-75% depending on field and data availability in CrossRef
-
-**Limitations:**
-- Some affiliations don't include country information
-- Some DOIs have no affiliation data
-- Non-standard institution names may be missed
-
-### Journal metrics
-
-- **SJR (Scimago Journal Rank)**: Free, publicly available via `sjrdata` R package
-- **Impact Factor**: Requires expensive subscription - not included
-- **TOP Factor**: Free, downloaded from Center for Open Science
-
-### Data sources
-
-- **CrossRef API** - Publication metadata
-- **Scimago** - Journal rankings
-- **Center for Open Science** - TOP Factor scores
-
-## Files
-
-- `extract_doi_metadata.R` - Main script
-- `download_top_factor.R` - Download TOP Factor data
-- `top_factor_manual_setup.R` - Manual download instructions (if needed)
-- `test_extended.R` - Test script with 10 diverse DOIs
-
-## Extending
-
-Add institution patterns for better coverage in your field:
-
-```r
-# Edit country_patterns in extract_doi_metadata.R
-country_patterns[["Brazil"]] <- c(
-  "\\b(USP|UNICAMP|UFRJ)\\b.*(University|Universidade)"
-)
-```
-
-## Limitations
-
-- **Country:** ~25-60% missing depending on CrossRef data quality
-- **SJR:** Not all journals indexed in Scimago
-- **TOP Factor:** Only evaluated journals included
-- **Metadata quality:** Depends on what publishers provide to CrossRef
+- `extract_doi_metadata.R` – core extraction and helper routines.
+- `download_top_factor.R` – helper for retrieving the TOP Factor dataset (creates `top_factor_data.RData`).
+- `top_factor_manual_setup.R` – fallback instructions if automated download fails.
 
 ## Requirements
 
 ```r
-rcrossref      # CrossRef API
-sjrdata        # SJR rankings
-countrycode    # Country standardization
-httr           # HTTP requests
-rjson          # JSON parsing
-dplyr          # Data manipulation
-stringr        # String operations
+httr        # OpenAlex queries
+countrycode # ISO-to-name conversion
+dplyr       # light data manipulation
+sjrdata     # Scimago Journal Rank reference data
 ```
 
 ## Citation
 
-If you use this in your research, cite the data sources:
-- **CrossRef**: https://www.crossref.org/
-- **Scimago**: https://www.scimagojr.com/
-- **TOP Guidelines**: Nosek et al. (2015). Promoting an open research culture. *Science*, 348(6242), 1422-1425.
+Please cite all data sources you rely on:
+- **OpenAlex**: https://openalex.org/
+- **Scimago Journal Rank**: https://www.scimagojr.com/
+- **Center for Open Science (TOP Factor)**: https://www.cos.io/initiatives/top-guidelines
 
 ## License
 
-MIT License - Free for academic and commercial use.
+MIT License – free for academic and commercial use.

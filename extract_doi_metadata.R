@@ -1,21 +1,15 @@
-# DOI Metadata Extraction for Systematic Reviews and Meta-Analyses
-# ============================================================================
-# Extracts: publication year, journal, ISSN, SJR, author country, TOP factor
-# Uses pattern matching for fast, reliable country extraction (75% coverage)
+# DOI Metadata Extraction ------------------------------------------------------
+# Focuses on OpenAlex for all metadata, journal metrics, and location data.
 
-# Required packages
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(
-  rcrossref,    # CrossRef API
-  sjrdata,      # SJR rankings
-  countrycode,  # Country standardization
-  httr,         # HTTP requests
-  rjson,        # JSON parsing
-  dplyr,        # Data manipulation
-  stringr       # String operations
+  httr,
+  countrycode,
+  dplyr,
+  sjrdata
 )
 
-# Load TOP Factor data if available
+# Optional TOP Factor data -----------------------------------------------------
 if (file.exists("top_factor_data.RData")) {
   load("top_factor_data.RData")
 } else {
@@ -23,225 +17,274 @@ if (file.exists("top_factor_data.RData")) {
   top_factor_data <- NULL
 }
 
-# Load SJR data
+# Constants -------------------------------------------------------------------
+OA_USER_AGENT <- "mailto:test@example.com"
 data("sjr_journals", package = "sjrdata")
 
-# Country detection patterns
-us_states <- c(
-  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
-  "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
-  "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana",
-  "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
-  "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada",
-  "New Hampshire", "New Jersey", "New Mexico", "New York",
-  "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon",
-  "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
-  "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington",
-  "West Virginia", "Wisconsin", "Wyoming", "District of Columbia", "DC"
-)
+# Utility helpers -------------------------------------------------------------
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0) y else x
+}
 
-us_state_abbr <- c(
-  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
-  "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
-  "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
-  "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
-  "WI", "WY", "DC"
-)
-
-# Known institution patterns by country
-country_patterns <- list(
-  "United States" = c(
-    "\\b(Harvard|Yale|Princeton|Stanford|MIT|Berkeley|UCLA|Columbia|Chicago|Penn|Cornell|Duke|Northwestern|Johns Hopkins|Caltech|Carnegie Mellon|Vanderbilt|Rice|Georgetown|Notre Dame|NYU|Boston|Michigan|Virginia Commonwealth|Virginia Tech)\\b.*(University|Institute|College)"
-  ),
-  "United Kingdom" = c(
-    "\\b(Oxford|Cambridge|London|Edinburgh|Manchester|Bristol|Birmingham|Glasgow|Leeds|Liverpool|Southampton|Durham|Warwick|Imperial|UCL|LSE|Kings College|Queen Mary)\\b.*(University|College)"
-  ),
-  "Canada" = c(
-    "\\b(Toronto|McGill|British Columbia|UBC|Montreal|Alberta|McMaster|Queens|Waterloo|Western Ontario|Calgary)\\b.*(University|College)"
-  ),
-  "Australia" = c(
-    "\\b(Sydney|Melbourne|Queensland|Monash|ANU|UNSW|Adelaide|Western Australia)\\b.*(University|College)"
-  ),
-  "Germany" = c(
-    "\\b(Berlin|Munich|Heidelberg|Bonn|Hamburg|Frankfurt|Cologne|Leipzig|Dresden|Freiburg)\\b.*(Universit|Institut)",
-    "Max Planck"
-  ),
-  "France" = c(
-    "\\b(Sorbonne|Paris|CNRS|ENS|École)\\b",
-    "Universit.*(Paris|Lyon|Marseille|Toulouse|Bordeaux|Strasbourg)"
-  ),
-  "Netherlands" = c(
-    "\\b(Amsterdam|Utrecht|Leiden|Groningen|Rotterdam|Maastricht|Delft|Erasmus)\\b.*(University|Universiteit)"
-  ),
-  "China" = c(
-    "\\b(Peking|Tsinghua|Fudan|Shanghai Jiao Tong|Zhejiang|Nanjing)\\b.*(University|College)"
-  ),
-  "Japan" = c(
-    "\\b(Tokyo|Kyoto|Osaka|Tohoku|Nagoya|Hokkaido)\\b.*(University|College)"
-  ),
-  "India" = c(
-    "\\b(IIT|Indian Institute)"
+safe_country_name <- function(iso2) {
+  if (is.null(iso2) || length(iso2) == 0) return(NA_character_)
+  tryCatch(
+    countrycode::countrycode(toupper(iso2), origin = "iso2c", destination = "country.name"),
+    error = function(e) NA_character_,
+    warning = function(w) NA_character_
   )
-)
+}
 
-#' Extract basic metadata from DOI
-get_basic_metadata <- function(doi) {
-  tryCatch({
-    work <- rcrossref::cr_works(doi = doi)$data
+as_numeric_or_na <- function(x) {
+  if (is.null(x) || length(x) == 0) return(NA_real_)
+  suppressWarnings(as.numeric(x))
+}
 
-    # Handle empty results
-    if (is.null(work) || nrow(work) == 0) {
-      return(list(year = NA, journal = NA, issn = NA, issn_all = NA))
+is_generic_institution <- function(name) {
+  if (is.null(name) || length(name) == 0) return(TRUE)
+  normalized <- tolower(trimws(name))
+  if (normalized == "") return(TRUE)
+  if (grepl("(university|universit|college|institute|academy|hospital|centre for|center for)", normalized)) {
+    return(FALSE)
+  }
+  grepl(
+    "^(department|dept\\.|school|faculty|centre|center|division|unit|program|programme|clinic|laboratory|lab|research group|office)\\b",
+    normalized
+  )
+}
+
+format_location_label <- function(location) {
+  if (is.null(location)) return(NA_character_)
+  pieces <- Filter(
+    function(x) !is.null(x) && length(x) > 0 && !is.na(x) && trimws(x) != "",
+    c(
+      location$display_name,
+      location$city,
+      location$region,
+      location$country
+    )
+  )
+  pieces <- unique(pieces)
+  if (length(pieces) == 0) return(NA_character_)
+  paste(pieces, collapse = ", ")
+}
+
+location_country <- function(location) {
+  if (is.null(location)) return(NA_character_)
+  value <- location$country %||% NA_character_
+  if (is.na(value) || !nzchar(value)) return(NA_character_)
+  value
+}
+
+# OpenAlex requests -----------------------------------------------------------
+fetch_openalex_work <- function(doi) {
+  url <- paste0("https://api.openalex.org/works/doi:", doi)
+  response <- tryCatch(
+    httr::GET(url, httr::add_headers(`User-Agent` = OA_USER_AGENT)),
+    error = function(e) NULL
+  )
+  if (is.null(response) || httr::status_code(response) != 200) {
+    warning(sprintf("OpenAlex work fetch failed for %s (status %s)", doi, httr::status_code(response %||% NA)))
+    return(NULL)
+  }
+  tryCatch(httr::content(response, as = "parsed"), error = function(e) NULL)
+}
+
+normalize_author_id <- function(author_id) {
+  if (is.null(author_id) || length(author_id) == 0 || is.na(author_id)) return(NA_character_)
+  if (startsWith(author_id, "https://openalex.org/")) {
+    sub("https://openalex.org/", "", author_id, fixed = TRUE)
+  } else {
+    author_id
+  }
+}
+
+fetch_author_profile <- function(author_id) {
+  author_id <- normalize_author_id(author_id)
+  if (is.na(author_id)) return(NULL)
+  url <- paste0("https://api.openalex.org/authors/", author_id)
+  response <- tryCatch(
+    httr::GET(url, httr::add_headers(`User-Agent` = OA_USER_AGENT)),
+    error = function(e) NULL
+  )
+  if (is.null(response) || httr::status_code(response) != 200) return(NULL)
+  tryCatch(httr::content(response, as = "parsed"), error = function(e) NULL)
+}
+
+# Location handling -----------------------------------------------------------
+build_location_details <- function(inst, source) {
+  if (is.null(inst)) return(NULL)
+  geo <- inst$geo %||% list()
+  iso2 <- inst$country_code %||% NA_character_
+  list(
+    id = inst$id %||% NA_character_,
+    display_name = inst$display_name %||% NA_character_,
+    type = inst$type %||% NA_character_,
+    country_code = if (!is.null(iso2)) toupper(iso2) else NA_character_,
+    country = safe_country_name(iso2),
+    city = geo$city %||% NA_character_,
+    region = geo$region %||% NA_character_,
+    latitude = as_numeric_or_na(geo$latitude),
+    longitude = as_numeric_or_na(geo$longitude),
+    source = source
+  )
+}
+
+select_institution_from_list <- function(institutions, source) {
+  if (is.null(institutions) || length(institutions) == 0) return(NULL)
+  for (inst in institutions) {
+    name <- inst$display_name %||% ""
+    if (is_generic_institution(name)) next
+    location <- build_location_details(inst, source)
+    if (!is.null(location)) return(location)
+  }
+  NULL
+}
+
+get_first_authorship <- function(authorships) {
+  if (is.null(authorships) || length(authorships) == 0) return(NULL)
+  for (authorship in authorships) {
+    if ((authorship$author_position %||% NA_character_) == "first") return(authorship)
+  }
+  authorships[[1]]
+}
+
+get_last_authorship <- function(authorships) {
+  if (is.null(authorships) || length(authorships) == 0) return(NULL)
+  for (i in seq_along(authorships)) {
+    idx <- length(authorships) - i + 1
+    authorship <- authorships[[idx]]
+    if ((authorship$author_position %||% NA_character_) == "last") return(authorship)
+  }
+  authorships[[length(authorships)]]
+}
+
+profile_institution_candidates <- function(profile) {
+  candidates <- list()
+  if (!is.null(profile$last_known_institution)) {
+    candidates <- c(candidates, list(profile$last_known_institution))
+  }
+  if (!is.null(profile$last_known_institutions) && length(profile$last_known_institutions) > 0) {
+    candidates <- c(candidates, profile$last_known_institutions)
+  }
+  if (!is.null(profile$affiliations) && length(profile$affiliations) > 0) {
+    for (aff in profile$affiliations) {
+      inst <- aff$institution %||% aff
+      candidates <- c(candidates, list(inst))
     }
+  }
+  Filter(function(x) !is.null(x), candidates)
+}
 
-    # Extract year
-    year <- NA
-    if (!is.null(work$published.print) && length(work$published.print) > 0 && !is.na(work$published.print)) {
-      year <- as.numeric(substr(work$published.print, 1, 4))
-    } else if (!is.null(work$published.online) && length(work$published.online) > 0 && !is.na(work$published.online)) {
-      year <- as.numeric(substr(work$published.online, 1, 4))
-    } else if (!is.null(work$issued) && length(work$issued) > 0 && !is.na(work$issued)) {
-      year <- as.numeric(substr(work$issued, 1, 4))
-    } else if (!is.null(work$created) && length(work$created) > 0 && !is.na(work$created)) {
-      year <- as.numeric(substr(work$created, 1, 4))
+get_article_location_details <- function(work) {
+  authorships <- work$authorships %||% list()
+  first_authorship <- get_first_authorship(authorships)
+  if (is.null(first_authorship)) return(NULL)
+  select_institution_from_list(first_authorship$institutions, "article")
+}
+
+get_author_profile_location <- function(authorship) {
+  if (is.null(authorship)) return(NULL)
+  profile <- fetch_author_profile(authorship$author$id)
+  if (is.null(profile)) return(NULL)
+  candidates <- profile_institution_candidates(profile)
+  for (inst in candidates) {
+    name <- inst$display_name %||% ""
+    if (is_generic_institution(name)) next
+    location <- build_location_details(inst, "author-profile")
+    if (!is.null(location)) return(location)
+  }
+  NULL
+}
+
+get_author_location_details <- function(work, article_location) {
+  authorships <- work$authorships %||% list()
+  first <- get_first_authorship(authorships)
+  last <- get_last_authorship(authorships)
+
+  location <- get_author_profile_location(first)
+  if (is.null(location)) {
+    # Avoid double-fetching if first and last are same person
+    if (!identical(first, last)) {
+      location <- get_author_profile_location(last)
     }
+  }
 
-    # Extract journal and ISSN
-    journal <- if (!is.null(work$container.title) && length(work$container.title) > 0) work$container.title else NA
-
-    if (!is.null(work$issn) && length(work$issn) > 0 && !is.na(work$issn)) {
-      issn_split <- strsplit(work$issn, ",")[[1]]
-      issn_all <- trimws(issn_split)
-      issn <- issn_all[1]
+  if (is.null(location)) {
+    if (!is.null(article_location)) {
+      article_location$source <- paste0(article_location$source, "|fallback")
+      location <- article_location
     } else {
-      issn <- NA
-      issn_all <- NA
+      location <- list(
+        id = NA_character_,
+        display_name = NA_character_,
+        type = NA_character_,
+        country_code = NA_character_,
+        country = NA_character_,
+        city = NA_character_,
+        region = NA_character_,
+        latitude = NA_real_,
+        longitude = NA_real_,
+        source = "missing"
+      )
     }
-
-    list(year = year, journal = journal, issn = issn, issn_all = issn_all)
-  }, error = function(e) {
-    message("  Error retrieving metadata: ", e$message)
-    list(year = NA, journal = NA, issn = NA, issn_all = NA)
-  })
+  }
+  location
 }
 
-#' Extract country from affiliation text
-extract_country_from_text <- function(text) {
-  if (is.na(text) || text == "" || length(text) == 0) return(NA)
-
-  # Method 1: Explicit country name at end
-  parts <- strsplit(text, ",")[[1]]
-  parts <- trimws(parts)
-
-  if (length(parts) > 0) {
-    last_part <- parts[length(parts)]
-    country_match <- tryCatch({
-      countrycode::countrycode(last_part, origin = "country.name", destination = "country.name")
-    }, error = function(e) NA, warning = function(w) NA)
-    if (!is.na(country_match)) return(country_match)
+# Metadata helpers ------------------------------------------------------------
+get_basic_metadata <- function(work) {
+  source <- work$primary_location$source %||% list()
+  if (length(source) == 0) {
+    source <- work$primary_location %||% list()
+  }
+  if (length(source) == 0) {
+    source <- work$host_venue %||% list()
   }
 
-  # Method 2: USA/UK abbreviations and states
-  if (grepl("\\b(USA|U\\.S\\.A\\.|United States)\\b", text, ignore.case = TRUE)) {
-    return("United States")
+  issn_candidates <- source$issn %||% character()
+  if (length(issn_candidates) > 0 && is.list(issn_candidates)) {
+    issn_candidates <- unlist(issn_candidates, use.names = FALSE)
   }
-
-  for (state in us_states) {
-    if (grepl(paste0("\\b", state, "\\b"), text, ignore.case = TRUE)) {
-      return("United States")
-    }
+  issn_candidates <- issn_candidates[!is.na(issn_candidates) & nzchar(issn_candidates)]
+  if (length(issn_candidates) == 0) {
+    issn_candidates <- source$issn_l %||% character()
   }
+  issn_candidates <- unique(issn_candidates)
 
-  for (abbr in us_state_abbr) {
-    if (grepl(paste0(",\\s*", abbr, "($|\\b|\\s+\\d)"), text)) {
-      return("United States")
-    }
-  }
-
-  if (grepl("\\b(UK|U\\.K\\.|United Kingdom|Great Britain)\\b", text, ignore.case = TRUE)) {
-    return("United Kingdom")
-  }
-
-  # Method 3: Known institution patterns
-  for (country in names(country_patterns)) {
-    for (pattern in country_patterns[[country]]) {
-      if (grepl(pattern, text, ignore.case = TRUE)) {
-        return(country)
-      }
-    }
-  }
-
-  # Method 4: Full country name anywhere
-  countries <- countrycode::codelist$country.name.en
-  for (country_name in countries) {
-    if (grepl(paste0("\\b", country_name, "\\b"), text, ignore.case = TRUE)) {
-      return(country_name)
-    }
-  }
-
-  return(NA)
+  list(
+    year = work$publication_year %||% NA_integer_,
+    journal = source$display_name %||% NA_character_,
+    issn_primary = if (length(issn_candidates) > 0) issn_candidates[1] else NA_character_,
+    issn_all = issn_candidates
+  )
 }
 
-#' Get corresponding author country from affiliation
-get_author_country <- function(doi) {
-  tryCatch({
-    work <- rcrossref::cr_works(doi = doi)$data
-
-    if (is.null(work) || nrow(work) == 0) return(NA)
-
-    if (!is.null(work$author) && length(work$author) > 0) {
-      authors <- work$author[[1]]
-
-      if ("affiliation.name" %in% names(authors) && length(authors$affiliation.name) > 0) {
-        for (aff in authors$affiliation.name) {
-          if (!is.na(aff) && length(aff) > 0 && nchar(aff) > 0) {
-            country <- extract_country_from_text(aff)
-            if (!is.na(country)) return(country)
-          }
-        }
-      }
-    }
-    return(NA)
-  }, error = function(e) {
-    return(NA)
-  })
-}
-
-#' Get journal SJR
 get_journal_sjr <- function(issn_all, year) {
-  if (all(is.na(issn_all)) || is.na(year)) return(NA)
-
+  if (is.null(issn_all) || length(issn_all) == 0 || is.na(year)) return(NA_real_)
   tryCatch({
     for (issn in issn_all) {
       if (is.na(issn)) next
       issn_clean <- gsub("[^0-9]", "", issn)
+      if (issn_clean == "") next
 
       journal_data <- sjr_journals %>%
         filter(year == !!year) %>%
         filter(grepl(issn_clean, gsub("[^0-9,]", "", issn)))
-
       if (nrow(journal_data) > 0) return(journal_data$sjr[1])
 
       journal_data <- sjr_journals %>%
         filter(grepl(issn_clean, gsub("[^0-9,]", "", issn))) %>%
         mutate(year_diff = abs(year - !!year)) %>%
         arrange(year_diff)
-
-      if (nrow(journal_data) > 0) {
-        message("  Using SJR from year ", journal_data$year[1])
-        return(journal_data$sjr[1])
-      }
+      if (nrow(journal_data) > 0) return(journal_data$sjr[1])
     }
-    return(NA)
-  }, error = function(e) {
-    return(NA)
-  })
+    NA_real_
+  }, error = function(e) NA_real_)
 }
 
-#' Get TOP factor
 get_top_factor <- function(journal_name, issn) {
-  if (is.null(top_factor_data)) return(NA)
-
+  if (is.null(top_factor_data)) return(NA_real_)
   tryCatch({
     if (!is.na(issn) && length(issn) > 0) {
       issn_clean <- gsub("-", "", issn)
@@ -249,58 +292,138 @@ get_top_factor <- function(journal_name, issn) {
         filter(gsub("-", "", Issn) == issn_clean | gsub("-", "", Eissn) == issn_clean)
       if (nrow(match) > 0) return(match$Total[1])
     }
-
     if (!is.na(journal_name) && length(journal_name) > 0) {
       match <- top_factor_data %>%
         filter(tolower(Journal) == tolower(journal_name))
       if (nrow(match) > 0) return(match$Total[1])
     }
-
-    return(NA)
-  }, error = function(e) {
-    return(NA)
-  })
+    NA_real_
+  }, error = function(e) NA_real_)
 }
 
-#' Main extraction function
-extract_doi_metadata <- function(doi) {
-  message("\n", doi)
+append_location_columns <- function(record, prefix, location) {
+  record[[paste0(prefix, "_id")]] <- location$id
+  record[[paste0(prefix, "_display_name")]] <- location$display_name
+  record[[paste0(prefix, "_type")]] <- location$type
+  record[[paste0(prefix, "_country_code")]] <- location$country_code
+  record[[paste0(prefix, "_country")]] <- location$country
+  record[[paste0(prefix, "_city")]] <- location$city
+  record[[paste0(prefix, "_region")]] <- location$region
+  record[[paste0(prefix, "_latitude")]] <- location$latitude
+  record[[paste0(prefix, "_longitude")]] <- location$longitude
+  record[[paste0(prefix, "_source")]] <- location$source
+  record
+}
 
-  basic <- get_basic_metadata(doi)
+# Public API ------------------------------------------------------------------
+extract_doi_metadata <- function(doi, return_location_details = TRUE) {
+  message("Processing ", doi)
+  work <- fetch_openalex_work(doi)
+  if (is.null(work)) {
+    empty <- data.frame(
+      doi = doi,
+      year = NA_integer_,
+      journal = NA_character_,
+      issn = NA_character_,
+      sjr = NA_real_,
+      top_factor = NA_real_,
+      article_location = NA_character_,
+      author_location = NA_character_,
+      primary_topic_display_name = NA_character_,
+      primary_topic_id = NA_character_,
+      stringsAsFactors = FALSE
+    )
+    empty$primary_topic <- I(list(NULL))
+    return(empty)
+  }
+
+  basic <- get_basic_metadata(work)
   sjr <- get_journal_sjr(basic$issn_all, basic$year)
-  country <- get_author_country(doi)
-  top_factor <- get_top_factor(basic$journal, basic$issn)
+  top_factor <- get_top_factor(basic$journal, basic$issn_primary)
+  article_location <- get_article_location_details(work)
+  author_location <- get_author_location_details(work, article_location)
+  article_country <- location_country(article_location)
+  author_country <- location_country(author_location)
+  article_label <- format_location_label(article_location)
+  author_label <- format_location_label(author_location)
 
-  data.frame(
+  record <- data.frame(
     doi = doi,
     year = basic$year,
     journal = basic$journal,
-    issn = basic$issn,
+    issn = basic$issn_primary,
     sjr = sjr,
-    country = country,
     top_factor = top_factor,
+    article_location = article_country,
+    author_location = author_country,
+    primary_topic_display_name = work$primary_topic$display_name %||% NA_character_,
+    primary_topic_id = work$primary_topic$id %||% NA_character_,
     stringsAsFactors = FALSE
   )
+  record$primary_topic <- I(list(work$primary_topic %||% NULL))
+
+  if (return_location_details) {
+    record$article_location_label <- article_label
+    record$author_location_label <- author_label
+
+    if (is.null(article_location)) {
+      article_location <- list(
+        id = NA_character_,
+        display_name = NA_character_,
+        type = NA_character_,
+        country_code = NA_character_,
+        country = NA_character_,
+        city = NA_character_,
+        region = NA_character_,
+        latitude = NA_real_,
+        longitude = NA_real_,
+        source = NA_character_
+      )
+    }
+    if (is.null(author_location)) {
+      author_location <- list(
+        id = NA_character_,
+        display_name = NA_character_,
+        type = NA_character_,
+        country_code = NA_character_,
+        country = NA_character_,
+        city = NA_character_,
+        region = NA_character_,
+        latitude = NA_real_,
+        longitude = NA_real_,
+        source = NA_character_
+      )
+    }
+    record <- append_location_columns(record, "article_location_detail", article_location)
+    record <- append_location_columns(record, "author_location_detail", author_location)
+  }
+
+  record
 }
 
-#' Process multiple DOIs
-process_dois <- function(dois) {
+process_dois <- function(dois, return_location_details = TRUE) {
   results <- lapply(dois, function(doi) {
-    tryCatch({
-      extract_doi_metadata(doi)
-    }, error = function(e) {
-      message("  ERROR: ", e$message)
-      data.frame(
-        doi = doi,
-        year = NA,
-        journal = NA,
-        issn = NA,
-        sjr = NA,
-        country = NA,
-        top_factor = NA,
-        stringsAsFactors = FALSE
-      )
-    })
+    tryCatch(
+      extract_doi_metadata(doi, return_location_details = return_location_details),
+      error = function(e) {
+        warning(sprintf("Extraction failed for %s: %s", doi, e$message))
+        fallback <- data.frame(
+          doi = doi,
+          year = NA_integer_,
+          journal = NA_character_,
+          issn = NA_character_,
+          sjr = NA_real_,
+          top_factor = NA_real_,
+          article_location = NA_character_,
+          author_location = NA_character_,
+          primary_topic_display_name = NA_character_,
+          primary_topic_id = NA_character_,
+          stringsAsFactors = FALSE
+        )
+        fallback$primary_topic <- I(list(NULL))
+        fallback
+      }
+    )
   })
   bind_rows(results)
 }
