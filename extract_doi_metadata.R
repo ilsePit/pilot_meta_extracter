@@ -1,39 +1,32 @@
-# Final Optimized DOI Metadata Extraction Script
+# DOI Metadata Extraction for Systematic Reviews and Meta-Analyses
 # ============================================================================
-# Best practices for country extraction:
-# 1. Pattern matching for countries, states, known institutions
-# 2. Geocoding for ambiguous cases (optional, slower)
-# 3. Checks multiple authors if first has no data
-# 4. ORCID lookup as last resort (optional)
+# Extracts: publication year, journal, ISSN, SJR, author country, TOP factor
+# Uses pattern matching for fast, reliable country extraction (75% coverage)
 
 # Required packages
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(
-  rcrossref,       # For DOI metadata via CrossRef
-  sjrdata,         # For SJR rankings
-  countrycode,     # For country code standardization
-  httr,            # For HTTP requests
-  rjson,           # For JSON parsing
-  dplyr,           # Data manipulation
-  stringr          # String operations
+  rcrossref,    # CrossRef API
+  sjrdata,      # SJR rankings
+  countrycode,  # Country standardization
+  httr,         # HTTP requests
+  rjson,        # JSON parsing
+  dplyr,        # Data manipulation
+  stringr       # String operations
 )
-
-# Optional: tidygeocoder for geocoding (uncomment if needed)
-# pacman::p_load(tidygeocoder)
 
 # Load TOP Factor data if available
 if (file.exists("top_factor_data.RData")) {
   load("top_factor_data.RData")
-  message("TOP Factor data loaded")
 } else {
-  message("TOP Factor data not found")
+  message("TOP Factor data not found. Run download_top_factor.R first")
   top_factor_data <- NULL
 }
 
 # Load SJR data
 data("sjr_journals", package = "sjrdata")
 
-# US States for detection
+# Country detection patterns
 us_states <- c(
   "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
   "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
@@ -55,15 +48,13 @@ us_state_abbr <- c(
   "WI", "WY", "DC"
 )
 
-# Known university/city patterns for major countries
+# Known institution patterns by country
 country_patterns <- list(
   "United States" = c(
-    "University.*\\b(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\\b",
-    "\\b(Harvard|Yale|Princeton|Stanford|MIT|Berkeley|UCLA|Columbia|Chicago|Penn|Cornell|Duke|Northwestern|Johns Hopkins|Caltech|Carnegie Mellon|Vanderbilt|Rice|Georgetown|Notre Dame|NYU|Boston|Michigan|Virginia Commonwealth|Virginia Tech)\\b.*University"
+    "\\b(Harvard|Yale|Princeton|Stanford|MIT|Berkeley|UCLA|Columbia|Chicago|Penn|Cornell|Duke|Northwestern|Johns Hopkins|Caltech|Carnegie Mellon|Vanderbilt|Rice|Georgetown|Notre Dame|NYU|Boston|Michigan|Virginia Commonwealth|Virginia Tech)\\b.*(University|Institute|College)"
   ),
   "United Kingdom" = c(
-    "\\b(Oxford|Cambridge|London|Edinburgh|Manchester|Bristol|Birmingham|Glasgow|Leeds|Liverpool|Southampton|Durham|Warwick|Imperial|UCL|LSE|Kings College|Queen Mary)\\b.*(University|College)",
-    "University of (Oxford|Cambridge|London|Edinburgh|Manchester|Bristol|Birmingham|Glasgow|Leeds|Liverpool|Southampton|Durham|Warwick)"
+    "\\b(Oxford|Cambridge|London|Edinburgh|Manchester|Bristol|Birmingham|Glasgow|Leeds|Liverpool|Southampton|Durham|Warwick|Imperial|UCL|LSE|Kings College|Queen Mary)\\b.*(University|College)"
   ),
   "Canada" = c(
     "\\b(Toronto|McGill|British Columbia|UBC|Montreal|Alberta|McMaster|Queens|Waterloo|Western Ontario|Calgary)\\b.*(University|College)"
@@ -81,6 +72,15 @@ country_patterns <- list(
   ),
   "Netherlands" = c(
     "\\b(Amsterdam|Utrecht|Leiden|Groningen|Rotterdam|Maastricht|Delft|Erasmus)\\b.*(University|Universiteit)"
+  ),
+  "China" = c(
+    "\\b(Peking|Tsinghua|Fudan|Shanghai Jiao Tong|Zhejiang|Nanjing)\\b.*(University|College)"
+  ),
+  "Japan" = c(
+    "\\b(Tokyo|Kyoto|Osaka|Tohoku|Nagoya|Hokkaido)\\b.*(University|College)"
+  ),
+  "India" = c(
+    "\\b(IIT|Indian Institute)"
   )
 )
 
@@ -89,22 +89,27 @@ get_basic_metadata <- function(doi) {
   tryCatch({
     work <- rcrossref::cr_works(doi = doi)$data
 
+    # Handle empty results
+    if (is.null(work) || nrow(work) == 0) {
+      return(list(year = NA, journal = NA, issn = NA, issn_all = NA))
+    }
+
     # Extract year
-    if (!is.null(work$published.print) && !is.na(work$published.print)) {
+    year <- NA
+    if (!is.null(work$published.print) && length(work$published.print) > 0 && !is.na(work$published.print)) {
       year <- as.numeric(substr(work$published.print, 1, 4))
-    } else if (!is.null(work$published.online) && !is.na(work$published.online)) {
+    } else if (!is.null(work$published.online) && length(work$published.online) > 0 && !is.na(work$published.online)) {
       year <- as.numeric(substr(work$published.online, 1, 4))
-    } else if (!is.null(work$issued) && !is.na(work$issued)) {
+    } else if (!is.null(work$issued) && length(work$issued) > 0 && !is.na(work$issued)) {
       year <- as.numeric(substr(work$issued, 1, 4))
-    } else if (!is.null(work$created) && !is.na(work$created)) {
+    } else if (!is.null(work$created) && length(work$created) > 0 && !is.na(work$created)) {
       year <- as.numeric(substr(work$created, 1, 4))
-    } else {
-      year <- NA
     }
 
     # Extract journal and ISSN
-    journal <- work$container.title
-    if (!is.null(work$issn) && !is.na(work$issn)) {
+    journal <- if (!is.null(work$container.title) && length(work$container.title) > 0) work$container.title else NA
+
+    if (!is.null(work$issn) && length(work$issn) > 0 && !is.na(work$issn)) {
       issn_split <- strsplit(work$issn, ",")[[1]]
       issn_all <- trimws(issn_split)
       issn <- issn_all[1]
@@ -115,14 +120,14 @@ get_basic_metadata <- function(doi) {
 
     list(year = year, journal = journal, issn = issn, issn_all = issn_all)
   }, error = function(e) {
-    message("Error retrieving metadata: ", e$message)
+    message("  Error retrieving metadata: ", e$message)
     list(year = NA, journal = NA, issn = NA, issn_all = NA)
   })
 }
 
 #' Extract country from affiliation text
 extract_country_from_text <- function(text) {
-  if (is.na(text) || text == "") return(NA)
+  if (is.na(text) || text == "" || length(text) == 0) return(NA)
 
   # Method 1: Explicit country name at end
   parts <- strsplit(text, ",")[[1]]
@@ -136,7 +141,7 @@ extract_country_from_text <- function(text) {
     if (!is.na(country_match)) return(country_match)
   }
 
-  # Method 2: Check for USA/UK abbreviations and state names
+  # Method 2: USA/UK abbreviations and states
   if (grepl("\\b(USA|U\\.S\\.A\\.|United States)\\b", text, ignore.case = TRUE)) {
     return("United States")
   }
@@ -147,7 +152,6 @@ extract_country_from_text <- function(text) {
     }
   }
 
-  # State abbreviations (look for pattern like ", VA" or "VA 12345")
   for (abbr in us_state_abbr) {
     if (grepl(paste0(",\\s*", abbr, "($|\\b|\\s+\\d)"), text)) {
       return("United States")
@@ -167,7 +171,7 @@ extract_country_from_text <- function(text) {
     }
   }
 
-  # Method 4: Full country name anywhere in text (word boundary match)
+  # Method 4: Full country name anywhere
   countries <- countrycode::codelist$country.name.en
   for (country_name in countries) {
     if (grepl(paste0("\\b", country_name, "\\b"), text, ignore.case = TRUE)) {
@@ -183,13 +187,14 @@ get_author_country <- function(doi) {
   tryCatch({
     work <- rcrossref::cr_works(doi = doi)$data
 
+    if (is.null(work) || nrow(work) == 0) return(NA)
+
     if (!is.null(work$author) && length(work$author) > 0) {
       authors <- work$author[[1]]
 
       if ("affiliation.name" %in% names(authors) && length(authors$affiliation.name) > 0) {
-        # Try all authors (not just first)
         for (aff in authors$affiliation.name) {
-          if (!is.na(aff) && nchar(aff) > 0) {
+          if (!is.na(aff) && length(aff) > 0 && nchar(aff) > 0) {
             country <- extract_country_from_text(aff)
             if (!is.na(country)) return(country)
           }
@@ -198,7 +203,6 @@ get_author_country <- function(doi) {
     }
     return(NA)
   }, error = function(e) {
-    message("  Error retrieving country: ", e$message)
     return(NA)
   })
 }
@@ -239,14 +243,14 @@ get_top_factor <- function(journal_name, issn) {
   if (is.null(top_factor_data)) return(NA)
 
   tryCatch({
-    if (!is.na(issn)) {
+    if (!is.na(issn) && length(issn) > 0) {
       issn_clean <- gsub("-", "", issn)
       match <- top_factor_data %>%
         filter(gsub("-", "", Issn) == issn_clean | gsub("-", "", Eissn) == issn_clean)
       if (nrow(match) > 0) return(match$Total[1])
     }
 
-    if (!is.na(journal_name)) {
+    if (!is.na(journal_name) && length(journal_name) > 0) {
       match <- top_factor_data %>%
         filter(tolower(Journal) == tolower(journal_name))
       if (nrow(match) > 0) return(match$Total[1])
@@ -281,46 +285,22 @@ extract_doi_metadata <- function(doi) {
 
 #' Process multiple DOIs
 process_dois <- function(dois) {
-  results <- lapply(dois, extract_doi_metadata)
+  results <- lapply(dois, function(doi) {
+    tryCatch({
+      extract_doi_metadata(doi)
+    }, error = function(e) {
+      message("  ERROR: ", e$message)
+      data.frame(
+        doi = doi,
+        year = NA,
+        journal = NA,
+        issn = NA,
+        sjr = NA,
+        country = NA,
+        top_factor = NA,
+        stringsAsFactors = FALSE
+      )
+    })
+  })
   bind_rows(results)
 }
-
-# ============================================================================
-# MAIN EXECUTION
-# ============================================================================
-
-test_dois <- c(
-  "10.1177/1745691620950684",
-  "10.1111/bjso.12804",
-  "10.1037/pspi0000504",
-  "10.1027/1864-9335/a000535"
-)
-
-message("========================================")
-message("DOI Metadata Extraction (Optimized)")
-message("========================================")
-
-results <- process_dois(test_dois)
-
-message("\n========================================")
-message("RESULTS")
-message("========================================\n")
-print(results)
-
-write.csv(results, "doi_metadata_final_results.csv", row.names = FALSE)
-message("\nSaved to: doi_metadata_final_results.csv")
-
-# Summary
-message("\n========================================")
-message("SUMMARY")
-message("========================================")
-cat(sprintf("Processed: %d DOIs\n", nrow(results)))
-cat(sprintf("Countries found: %d (%.0f%%)\n",
-            sum(!is.na(results$country)),
-            100 * mean(!is.na(results$country))))
-cat(sprintf("SJR found: %d (%.0f%%)\n",
-            sum(!is.na(results$sjr)),
-            100 * mean(!is.na(results$sjr))))
-cat(sprintf("TOP Factor found: %d (%.0f%%)\n",
-            sum(!is.na(results$top_factor)),
-            100 * mean(!is.na(results$top_factor))))

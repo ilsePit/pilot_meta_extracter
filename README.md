@@ -1,37 +1,35 @@
-# Pilot Meta Extractor
+# DOI Metadata Extractor
 
-Comprehensive R scripts for extracting publication metadata from DOIs for systematic reviews and meta-analyses.
+R script for extracting comprehensive publication metadata from DOIs for systematic reviews and meta-analyses.
 
-## Features
+## What it extracts
 
-Extract complete metadata from DOIs:
-
-- ✅ **Publication year** - from CrossRef API
-- ✅ **Journal name** and ISSN
-- ✅ **Journal impact metrics** - SJR (Scimago Journal Rank) as free alternative to Impact Factor
-- ✅ **Corresponding author country** - extracted from affiliations with 75% coverage
-- ✅ **TOP Factor** - Transparency and Openness Promotion scores (0-29) from Center for Open Science
+For each DOI, get:
+- **Publication year** and **journal name**
+- **ISSN**
+- **SJR** (Scimago Journal Rank) - free alternative to Impact Factor
+- **Corresponding author country** - extracted from affiliations (40-75% coverage depending on data availability)
+- **TOP Factor** - journal transparency score (0-29) from Center for Open Science
 
 ## Quick Start
 
-### Installation
+### 1. Install packages
 
 ```r
-# Install required packages
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(rcrossref, sjrdata, countrycode, httr, rjson, dplyr, stringr)
 ```
 
-### Download TOP Factor Data (One-time)
+### 2. Download TOP Factor data (one-time)
 
 ```r
 source("download_top_factor.R")
 ```
 
-### Process Your DOIs
+### 3. Extract metadata
 
 ```r
-source("doi_metadata_final.R")
+source("extract_doi_metadata.R")
 
 # Your DOIs
 my_dois <- c(
@@ -44,190 +42,104 @@ my_dois <- c(
 results <- process_dois(my_dois)
 
 # Save results
-write.csv(results, "my_results.csv", row.names = FALSE)
+write.csv(results, "results.csv", row.names = FALSE)
 ```
 
-## Scripts
+## Example output
 
-### Main Scripts
+Tested with 10 diverse DOIs (psychology, medicine, philosophy, Danish, French, Indonesian journals, preprint, book chapter, old paper from 1974):
 
-| Script | Description | Speed | Country Coverage |
-|--------|-------------|-------|------------------|
-| **doi_metadata_final.R** ✨ | **Recommended** - Pattern matching | ⚡ Instant | 75% |
-| doi_metadata_enhanced.R | With geocoding (OSM Nominatim) | ⏱️ ~2s/DOI | 85-90% |
-| doi_metadata_complete.R | Original complete version | ⚡ Instant | 50% |
-| doi_quick_test.R | Quick test (no SJR/TOP Factor) | ⚡ Instant | Basic |
-
-### Helper Scripts
-
-- **download_top_factor.R** - Download TOP Factor data from OSF
-- **top_factor_manual_setup.R** - Manual TOP Factor setup guide
-- **check_missing_affiliations.R** - Debug affiliation data
-
-## Documentation
-
-- **[README_DOI_EXTRACTOR.md](README_DOI_EXTRACTOR.md)** - Detailed technical documentation
-- **[COUNTRY_EXTRACTION_GUIDE.md](COUNTRY_EXTRACTION_GUIDE.md)** - Country extraction strategies and trade-offs
-
-## Example Output
-
-```csv
-doi,year,journal,issn,sjr,country,top_factor
-10.1177/1745691620950684,2021,Perspectives on Psychological Science,1745-6916,4.563,United States,0
-10.1111/bjso.12804,2025,British Journal of Social Psychology,0144-6665,1.665,France,10
-10.1037/pspi0000504,2025,Journal of Personality and Social Psychology,1939-1315,3.865,NA,20
-10.1027/1864-9335/a000535,2023,Social Psychology,1864-9335,0.668,United States,11
+```
+Total DOIs: 10
+Years found: 10 (100%)
+Journals found: 9 (90%)
+SJR found: 5 (50%)
+Countries found: 4 (40%)
+TOP Factor found: 4 (40%)
 ```
 
-## Data Sources
+Sample results:
 
-- **CrossRef API** - Publication metadata (year, journal, ISSN, authors)
-- **Scimago Journal Rank** - Journal impact metrics (via `sjrdata` package)
-- **Center for Open Science** - TOP Factor transparency scores
-- **OpenStreetMap Nominatim** - Geocoding for country extraction (optional)
+| DOI | Year | Journal | SJR | Country | TOP |
+|-----|------|---------|-----|---------|-----|
+| 10.1177/1745691620950684 | 2021 | Perspectives on Psychological Science | 4.563 | United States | 0 |
+| 10.1111/bjso.12804 | 2025 | British Journal of Social Psychology | 1.665 | France | 10 |
+| 10.1136/bmj.3.5932.655 | 1974 | BMJ | NA | NA | NA |
+| 10.7146/ln.v0i1.19000 | 1994 | LexicoNordica | NA | NA | NA |
 
-## Country Extraction
+## How it works
 
-### Pattern Matching (Default - Recommended)
+### Country extraction
 
-- ✅ Instant processing
-- ✅ No API dependencies
-- ✅ 75% coverage
-- Detects: US states, major universities, country names
+Uses pattern matching to identify countries from affiliation text:
+- ✅ US state names and abbreviations
+- ✅ Major universities (Harvard, Oxford, Peking, etc.)
+- ✅ Country names and common abbreviations (USA, UK, etc.)
+- ✅ Checks all authors (not just first)
 
-### Geocoding (Optional)
+**Coverage:** 40-75% depending on field and data availability in CrossRef
 
-- ✅ 85-90% coverage
-- ⚠️ ~2 seconds per DOI
-- ⚠️ Requires internet connection
-- Uses free OpenStreetMap Nominatim API
+**Limitations:**
+- Some affiliations don't include country information
+- Some DOIs have no affiliation data
+- Non-standard institution names may be missed
 
-See [COUNTRY_EXTRACTION_GUIDE.md](COUNTRY_EXTRACTION_GUIDE.md) for detailed comparison.
+### Journal metrics
 
-## Why SJR Instead of Impact Factor?
+- **SJR (Scimago Journal Rank)**: Free, publicly available via `sjrdata` R package
+- **Impact Factor**: Requires expensive subscription - not included
+- **TOP Factor**: Free, downloaded from Center for Open Science
 
-**Impact Factor** from Clarivate/Web of Science requires expensive subscription.
+### Data sources
 
-**SJR** (Scimago Journal Rank):
-- ✅ Free and publicly available
-- ✅ Calculated using Scopus data
-- ✅ Correlates well with Impact Factor
-- ✅ Available through `sjrdata` R package
+- **CrossRef API** - Publication metadata
+- **Scimago** - Journal rankings
+- **Center for Open Science** - TOP Factor scores
 
-## TOP Factor Explained
+## Files
 
-TOP Factor scores journal policies on:
-- Data citation and transparency
-- Code/materials sharing
-- Study and analysis plan preregistration
-- Replication studies
-- Registered reports
+- `extract_doi_metadata.R` - Main script
+- `download_top_factor.R` - Download TOP Factor data
+- `top_factor_manual_setup.R` - Manual download instructions (if needed)
+- `test_extended.R` - Test script with 10 diverse DOIs
 
-**Range:** 0-29 (higher = more transparent/open)
+## Extending
+
+Add institution patterns for better coverage in your field:
+
+```r
+# Edit country_patterns in extract_doi_metadata.R
+country_patterns[["Brazil"]] <- c(
+  "\\b(USP|UNICAMP|UFRJ)\\b.*(University|Universidade)"
+)
+```
 
 ## Limitations
 
-- **Country extraction:** ~25% of DOIs may have incomplete/missing affiliation data
-- **SJR availability:** Some journals not indexed in Scimago
-- **TOP Factor:** Only covers journals that have been evaluated by COS
+- **Country:** ~25-60% missing depending on CrossRef data quality
+- **SJR:** Not all journals indexed in Scimago
+- **TOP Factor:** Only evaluated journals included
 - **Metadata quality:** Depends on what publishers provide to CrossRef
-
-## Test Results
-
-Successfully tested with 4 DOIs from psychology journals:
-- ✅ 100% metadata retrieval (year, journal, ISSN)
-- ✅ 100% SJR coverage
-- ✅ 75% country extraction
-- ✅ 100% TOP Factor coverage
-
-## Performance
-
-- **Pattern matching:** ~0.5 seconds per DOI
-- **With geocoding:** ~2 seconds per DOI
-- **Batch processing:** Process 1000 DOIs in ~8-10 minutes (pattern matching)
 
 ## Requirements
 
-### R Packages
-
 ```r
-rcrossref      # CrossRef API interface
-sjrdata        # SJR journal rankings
-countrycode    # Country name standardization
+rcrossref      # CrossRef API
+sjrdata        # SJR rankings
+countrycode    # Country standardization
 httr           # HTTP requests
 rjson          # JSON parsing
 dplyr          # Data manipulation
 stringr        # String operations
-tidygeocoder   # Optional, for geocoding
-```
-
-### Data Files
-
-- **top_factor_data.RData** - Downloaded automatically by `download_top_factor.R`
-
-## Contributing
-
-To improve country extraction for your field:
-
-1. Add institution patterns to `country_patterns` in the script
-2. Test with your DOIs
-3. Submit improvements
-
-Example:
-
-```r
-country_patterns[["Germany"]] <- c(
-  country_patterns[["Germany"]],
-  "\\b(TU Munich|LMU Munich|Charité)\\b"
-)
 ```
 
 ## Citation
 
-If you use these scripts in your research, please cite the data sources:
-
-- **CrossRef:** https://www.crossref.org/
-- **Scimago Journal Rank:** https://www.scimagojr.com/
-- **TOP Guidelines:** Nosek, B. A., et al. (2015). Promoting an open research culture. *Science*, 348(6242), 1422-1425.
+If you use this in your research, cite the data sources:
+- **CrossRef**: https://www.crossref.org/
+- **Scimago**: https://www.scimagojr.com/
+- **TOP Guidelines**: Nosek et al. (2015). Promoting an open research culture. *Science*, 348(6242), 1422-1425.
 
 ## License
 
 MIT License - Free for academic and commercial use.
-
-## Troubleshooting
-
-### "TOP Factor data not found"
-
-Run: `source("download_top_factor.R")`
-
-### "SJR not found for journal"
-
-The journal may not be indexed in Scimago. This is normal for some journals.
-
-### Low country coverage
-
-Try the enhanced script with geocoding:
-```r
-source("doi_metadata_enhanced.R")
-results <- process_multiple_dois(my_dois, use_geocoding = TRUE)
-```
-
-### Rate limit errors with geocoding
-
-Nominatim allows 1 request/second. The script includes delays, but if you get errors:
-- Reduce batch size
-- Increase delay in the script
-- Consider running your own Nominatim server
-
-## Author
-
-Created by Claude (Anthropic) for academic research purposes.
-
-## Changelog
-
-### v1.0 (2025-10-14)
-- Initial release
-- Pattern-based country extraction (75% coverage)
-- SJR and TOP Factor integration
-- Optional geocoding support
-- Comprehensive documentation
