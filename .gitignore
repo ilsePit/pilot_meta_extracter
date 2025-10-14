@@ -1,0 +1,26 @@
+# R files
+.Rhistory
+.RData
+.Rproj.user
+*.Rproj
+
+# Data files (large)
+top_factor_data.csv
+top_factor_data.RData
+
+# Output files (user-generated)
+*_results.csv
+doi_metadata_results.csv
+doi_quick_test_results.csv
+doi_metadata_complete_results.csv
+doi_metadata_enhanced_results.csv
+doi_metadata_final_results.csv
+my_results.csv
+my_doi_results.csv
+
+# Temporary files
+.DS_Store
+*~
+*.swp
+*.swo
+.Rproj.user/
