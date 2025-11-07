@@ -10,10 +10,11 @@ For each DOI, `process_dois()` returns:
 - Scimago Journal Rank (matched on ISSN/year via `sjrdata`)
 - TOP Factor (if `top_factor_data.RData` has been downloaded)
 - The OpenAlex `primary_topic` field (full object, plus display name and id helpers)
-- Two country columns:
-  - `article_location` – country of the article-level institution (first author affiliation)
-  - `author_location` – country of the author-profile institution (first, then last author fallback)
-- Optional detailed columns describing both locations (`return_location_details = TRUE`)
+- Three country columns:
+  - `article_location` – country of the first author's article-level affiliation
+  - `first_author_location` – country of the first author's profile (most recent institution)
+  - `last_author_location` – country of the last author's profile (most recent institution)
+- Optional detailed columns for each location (`return_location_details = TRUE`), including institution name, type, city, region, latitude, longitude, and data source
 
 ## Quick start
 
@@ -48,14 +49,20 @@ test_dois <- c(
 process_dois(test_dois, return_location_details = TRUE)
 ```
 
-Expect both `article_location` and `author_location` to be populated with country names, with `author_location_detail_source` showing `author-profile` when profile data was available; `article_location_label` and `author_location_label` (present when `return_location_details = TRUE`) contain the full institution strings.
+Expected output:
+- `article_location` contains the country of the first author's article-level affiliation
+- `first_author_location` and `last_author_location` contain countries from the authors' profile data when available
+- `first_author_location_detail_source` and `last_author_location_detail_source` indicate the data source (`author-profile` or `NA`)
+- Location labels provide full institution details when `return_location_details = TRUE`
 
 ## How it works
 
-1. **OpenAlex Works API** supplies publication metadata, host venue, location-rich authorship information, and the primary topic.
-2. **Institution choice** – the first author’s article-level institution is treated as the canonical article location; generic department names are skipped.
-3. **Author affiliation** – the first author’s profile is queried for current or most recent institutions, backed off to the last author, then to article metadata when necessary.
-4. **Metrics** – SJR values are pulled from `sjrdata`, while TOP Factor scores are matched against the optional download file.
+1. **OpenAlex Works API** supplies publication metadata, host venue, location-rich authorship information and the primary topic.
+2. **Article location** – extracted from the first author's article-level institution affiliations; generic department names are skipped.
+3. **First author location** – the first author's profile is queried for the most recent institution via OpenAlex Authors API (`last_known_institution` → `last_known_institutions` → `affiliations`).
+4. **Last author location** – the last author's profile is queried independently using the same priority order.
+5. **Metrics** – SJR values are pulled from `sjrdata`, while TOP Factor scores are matched against the optional download file.
+6. **Country extraction** – all locations extract the `country_code` field from OpenAlex institutions and convert it to the full country name using ISO-2 to country name mapping.
 
 ## Repository layout
 

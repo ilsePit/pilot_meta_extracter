@@ -18,7 +18,7 @@ if (file.exists("top_factor_data.RData")) {
 }
 
 # Constants -------------------------------------------------------------------
-OA_USER_AGENT <- "mailto:test@example.com"
+OA_USER_AGENT <- "mailto:lukas.wallrich@gmail.com"
 data("sjr_journals", package = "sjrdata")
 
 # Utility helpers -------------------------------------------------------------
@@ -197,39 +197,17 @@ get_author_profile_location <- function(authorship) {
   NULL
 }
 
-get_author_location_details <- function(work, article_location) {
+get_first_author_location_details <- function(work) {
   authorships <- work$authorships %||% list()
-  first <- get_first_authorship(authorships)
-  last <- get_last_authorship(authorships)
+  authorship <- get_first_authorship(authorships)
+  get_author_profile_location(authorship)
+}
 
-  location <- get_author_profile_location(first)
-  if (is.null(location)) {
-    # Avoid double-fetching if first and last are same person
-    if (!identical(first, last)) {
-      location <- get_author_profile_location(last)
-    }
-  }
-
-  if (is.null(location)) {
-    if (!is.null(article_location)) {
-      article_location$source <- paste0(article_location$source, "|fallback")
-      location <- article_location
-    } else {
-      location <- list(
-        id = NA_character_,
-        display_name = NA_character_,
-        type = NA_character_,
-        country_code = NA_character_,
-        country = NA_character_,
-        city = NA_character_,
-        region = NA_character_,
-        latitude = NA_real_,
-        longitude = NA_real_,
-        source = "missing"
-      )
-    }
-  }
-  location
+get_last_author_location_details <- function(work) {
+  authorships <- work$authorships %||% list()
+  authorship <- get_last_authorship(authorships)
+  if (is.null(authorship)) return(NULL)
+  get_author_profile_location(authorship)
 }
 
 # Metadata helpers ------------------------------------------------------------
@@ -315,6 +293,22 @@ append_location_columns <- function(record, prefix, location) {
   record
 }
 
+# Helper to create empty location object
+empty_location <- function() {
+  list(
+    id = NA_character_,
+    display_name = NA_character_,
+    type = NA_character_,
+    country_code = NA_character_,
+    country = NA_character_,
+    city = NA_character_,
+    region = NA_character_,
+    latitude = NA_real_,
+    longitude = NA_real_,
+    source = NA_character_
+  )
+}
+
 # Public API ------------------------------------------------------------------
 extract_doi_metadata <- function(doi, return_location_details = TRUE) {
   message("Processing ", doi)
@@ -328,7 +322,8 @@ extract_doi_metadata <- function(doi, return_location_details = TRUE) {
       sjr = NA_real_,
       top_factor = NA_real_,
       article_location = NA_character_,
-      author_location = NA_character_,
+      first_author_location = NA_character_,
+      last_author_location = NA_character_,
       primary_topic_display_name = NA_character_,
       primary_topic_id = NA_character_,
       stringsAsFactors = FALSE
@@ -340,12 +335,18 @@ extract_doi_metadata <- function(doi, return_location_details = TRUE) {
   basic <- get_basic_metadata(work)
   sjr <- get_journal_sjr(basic$issn_all, basic$year)
   top_factor <- get_top_factor(basic$journal, basic$issn_primary)
+
   article_location <- get_article_location_details(work)
-  author_location <- get_author_location_details(work, article_location)
+  first_author_location <- get_first_author_location_details(work)
+  last_author_location <- get_last_author_location_details(work)
+
   article_country <- location_country(article_location)
-  author_country <- location_country(author_location)
+  first_author_country <- location_country(first_author_location)
+  last_author_country <- location_country(last_author_location)
+
   article_label <- format_location_label(article_location)
-  author_label <- format_location_label(author_location)
+  first_author_label <- format_location_label(first_author_location)
+  last_author_label <- format_location_label(last_author_location)
 
   record <- data.frame(
     doi = doi,
@@ -355,7 +356,8 @@ extract_doi_metadata <- function(doi, return_location_details = TRUE) {
     sjr = sjr,
     top_factor = top_factor,
     article_location = article_country,
-    author_location = author_country,
+    first_author_location = first_author_country,
+    last_author_location = last_author_country,
     primary_topic_display_name = work$primary_topic$display_name %||% NA_character_,
     primary_topic_id = work$primary_topic$id %||% NA_character_,
     stringsAsFactors = FALSE
@@ -364,38 +366,16 @@ extract_doi_metadata <- function(doi, return_location_details = TRUE) {
 
   if (return_location_details) {
     record$article_location_label <- article_label
-    record$author_location_label <- author_label
+    record$first_author_location_label <- first_author_label
+    record$last_author_location_label <- last_author_label
 
-    if (is.null(article_location)) {
-      article_location <- list(
-        id = NA_character_,
-        display_name = NA_character_,
-        type = NA_character_,
-        country_code = NA_character_,
-        country = NA_character_,
-        city = NA_character_,
-        region = NA_character_,
-        latitude = NA_real_,
-        longitude = NA_real_,
-        source = NA_character_
-      )
-    }
-    if (is.null(author_location)) {
-      author_location <- list(
-        id = NA_character_,
-        display_name = NA_character_,
-        type = NA_character_,
-        country_code = NA_character_,
-        country = NA_character_,
-        city = NA_character_,
-        region = NA_character_,
-        latitude = NA_real_,
-        longitude = NA_real_,
-        source = NA_character_
-      )
-    }
+    if (is.null(article_location)) article_location <- empty_location()
+    if (is.null(first_author_location)) first_author_location <- empty_location()
+    if (is.null(last_author_location)) last_author_location <- empty_location()
+
     record <- append_location_columns(record, "article_location_detail", article_location)
-    record <- append_location_columns(record, "author_location_detail", author_location)
+    record <- append_location_columns(record, "first_author_location_detail", first_author_location)
+    record <- append_location_columns(record, "last_author_location_detail", last_author_location)
   }
 
   record
@@ -415,7 +395,8 @@ process_dois <- function(dois, return_location_details = TRUE) {
           sjr = NA_real_,
           top_factor = NA_real_,
           article_location = NA_character_,
-          author_location = NA_character_,
+          first_author_location = NA_character_,
+          last_author_location = NA_character_,
           primary_topic_display_name = NA_character_,
           primary_topic_id = NA_character_,
           stringsAsFactors = FALSE
