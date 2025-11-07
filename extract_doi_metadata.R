@@ -2,6 +2,8 @@
 # Focuses on OpenAlex for all metadata, journal metrics, and location data.
 
 if (!require("pacman")) install.packages("pacman")
+if (!require("pak", quietly = TRUE)) install.packages("pak")
+if (!require("sjrdata", quietly = TRUE)) pak::pak("ikashnitsky/sjrdata")
 pacman::p_load(
   httr,
   countrycode,
