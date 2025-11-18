@@ -479,11 +479,13 @@ extract_doi_metadata <- function(doi, return_location_details = TRUE) {
   last_author_label <- format_location_label(last_author_location)
   
   # -------------------- Extract OpenAlex funding -----------------------
+  # REDUNDANT > openalex uses crossref, crossref output seems more complete
+  # only relevant if we want to use the open alex ids for funders
   oa_f <- get_openalex_funding(work)
   funding_funders_openalex <- if (length(oa_f$funders) > 0) paste(oa_f$funders, collapse = " || ") else NA_character_
   funding_funder_ids_openalex <- if (length(oa_f$funder_ids) > 0) paste(oa_f$funder_ids, collapse = " || ") else NA_character_
   funding_award_ids_openalex <- if (length(oa_f$award_ids) > 0) paste(oa_f$award_ids, collapse = " || ") else NA_character_
-  # funding_grants_openalex <- oa_f$grants %||% NULL
+  # funding_grants_openalex <- oa_f$grants %||% NULL # raw info
   
   # -------------------- Attempt Crossref and extract funding & COI & abstract--------------
   cr_msg <- fetch_crossref_work(doi, email = OA_USER_AGENT)
