@@ -453,10 +453,6 @@ extract_doi_metadata <- function(doi, return_location_details = TRUE) {
       stringsAsFactors = FALSE
     )
     empty$primary_topic <- I(list(NULL))
-    empty$funding_grants_openalex <- I(list(NULL))
-    empty$funding_grants_crossref <- I(list(NULL))
-    empty$funding_nodes_crossref <- I(list(list()))
-    empty$funding_first_match_crossref <- I(list(NULL))
     return(empty)
   }
   
@@ -587,8 +583,6 @@ process_dois <- function(dois, return_location_details = TRUE, output_file = NUL
           stringsAsFactors = FALSE
         )
         fallback$primary_topic <- I(list(NULL))
-        fallback$funding_grants_openalex <- I(list(NULL))
-        fallback$funding_grants_crossref <- I(list(NULL))
         fallback
       }
     )
