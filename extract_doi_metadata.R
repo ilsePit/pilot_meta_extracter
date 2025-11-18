@@ -20,7 +20,7 @@ if (file.exists("top_factor_data.RData")) {
 }
 
 # Constants -------------------------------------------------------------------
-OA_USER_AGENT <- "mailto:ilsepit@gmail.com"
+OA_USER_AGENT <- "mailto:lukas.wallrich@gmail.com"
 data("sjr_journals", package = "sjrdata")
 
 # Utility helpers -------------------------------------------------------------
