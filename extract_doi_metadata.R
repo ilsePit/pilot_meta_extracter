@@ -113,6 +113,38 @@ fetch_author_profile <- function(author_id) {
   tryCatch(httr::content(response, as = "parsed"), error = function(e) NULL)
 }
 
+# Extract funding (grants) info from OpenAlex work object
+get_openalex_funding <- function(work) {
+  if (is.null(work)) return(list(funders = character(), funder_ids = character(), award_ids = character(), grants = NULL))
+  
+  grants <- work$grants %||% list()
+  if (length(grants) == 0) return(list(funders = character(), funder_ids = character(), award_ids = character(), grants = NULL))
+  
+  # unclear if this is deprecated, no documentation on it, but has ror id for funders
+  # currently not included
+  # funders_work <- work$funders %||% list()
+
+  funders <- c()
+  funder_ids <- c()
+  award_ids <- c()
+  for (g in grants) {
+    fid <- g$funder %||% NA_character_
+    fname <- g$funder_display_name %||% NA_character_
+    aid <- g$award_id %||% NA_character_
+    
+    if (!is.na(fname) && nzchar(fname)) funders <- c(funders, fname)
+    if (!is.na(fname) && nzchar(fname)) funder_ids <- c(funder_ids, fid)
+    if (!is.na(aid) && nzchar(aid)) award_ids <- c(award_ids, aid)
+  }
+  
+  list(
+    funders = if (length(funders) > 0) unique(funders) else character(),
+    funder_ids = if (length(funder_ids) > 0) unique(funder_ids) else character(),
+    award_ids = if (length(award_ids) > 0) unique(award_ids) else character()#,
+    # grants = grants # keep raw
+  )
+}
+
 # Location handling -----------------------------------------------------------
 build_location_details <- function(inst, source) {
   if (is.null(inst)) return(NULL)
@@ -211,6 +243,85 @@ get_last_author_location_details <- function(work) {
   if (is.null(authorship)) return(NULL)
   get_author_profile_location(authorship)
 }
+
+# ----------------- Crossref helpers: fetch + extract funding & COI --------------
+# polite Crossref fetch for DOI -> returns Crossref 'message' or NULL
+fetch_crossref_work <- function(doi, email = OA_USER_AGENT) {
+  if (is.null(doi) || !nzchar(doi)) return(NULL)
+  url <- paste0("https://api.crossref.org/works/", URLencode(doi, reserved = TRUE))
+  headers <- httr::add_headers(`User-Agent` = paste0("doi-metadata-script (", email, ")"))
+  resp <- tryCatch(
+    httr::GET(url, headers, httr::accept_json()),
+    error = function(e) NULL
+  )
+  if (is.null(resp) || httr::status_code(resp) != 200) return(NULL)
+  content <- tryCatch(httr::content(resp, as = "parsed", simplifyVector = FALSE), error = function(e) NULL)
+  if (is.null(content) || is.null(content$message)) return(NULL)
+  content$message
+}
+
+get_crossref_funding = function(msg) {
+  if (is.null(msg)) return(list(funders = character(), funder_ids = character(), award_ids = character(), raw = NULL))
+  funder_nodes <- msg$funder %||% msg$funding %||% list()
+  if (length(funder_nodes) == 0) return(list(funders = character(), funder_ids = character(), award_ids = character(), raw = NULL))
+  
+  funders <- character()
+  funder_ids <- character()
+  award_ids <- character()
+  
+  for (f in funder_nodes) {
+    name <- f$name %||% f$funder_name %||% NA_character_
+    fid <- f$DOI %||% f$funder_id %||% f$`@id` %||% NA_character_
+    aw <- f$award %||% f$awards %||% character()
+    if (!is.na(name) && nzchar(name)) funders <- c(funders, name)
+    if (!is.na(fid) && nzchar(fid)) funder_ids <- c(funder_ids, fid)
+    if (!is.null(aw) && length(aw) > 0) award_ids <- c(award_ids, unlist(aw, use.names = FALSE))
+  }
+  
+  list(
+    funders = if (length(funders) > 0) unique(funders) else character(),
+    funder_ids = if (length(funder_ids) > 0) unique(funder_ids) else character(),
+    award_ids = if (length(award_ids) > 0) unique(award_ids) else character(),
+    raw = funder_nodes
+  )
+}
+
+# Heuristic: find COI/competing interests in Crossref message fields
+get_crossref_coi <- function(msg) {
+  if (is.null(msg)) return(NA_character_)
+  # shallow recursive scan for COI phrases
+  found <- character()
+  limit <- 2000L
+  counter <- 0L
+  recurse <- function(v) {
+    counter <<- counter + 1L
+    if (counter > limit) return(NULL)
+    if (is.null(v)) return(NULL)
+    if (is.atomic(v) && is.character(v)) {
+      for (el in v) {
+        if (!is.na(el) && nzchar(el)) {
+          lower <- tolower(el)
+          # based on search keys in coding form V4 and some trial and error -- FIXME
+          if (grepl("(conflict(s)? of interest(s)?|conflicting interests?|no conflicts?|competing interests?|disclos|declar)", lower, perl = TRUE)) {
+            found <<- c(found, trimws(el))
+          }
+        }
+      }
+    } else if (is.list(v)) {
+      for (sub in v) {
+        recurse(sub)
+        if (counter > limit) break
+      }
+    }
+    invisible(NULL)
+  }
+  
+  recurse(msg)
+  if (length(found) == 0) return(NA_character_)
+  paste(unique(found), collapse = " || ")
+}
+
+
 
 # Metadata helpers ------------------------------------------------------------
 get_basic_metadata <- function(work) {
@@ -314,7 +425,11 @@ empty_location <- function() {
 # Public API ------------------------------------------------------------------
 extract_doi_metadata <- function(doi, return_location_details = TRUE) {
   message("Processing ", doi)
+  
+  # Try to fetch OpenAlex work
   work <- fetch_openalex_work(doi)
+  
+  # If OpenAlex fetch failed, return an empty row with all columns present
   if (is.null(work)) {
     empty <- data.frame(
       doi = doi,
@@ -328,28 +443,69 @@ extract_doi_metadata <- function(doi, return_location_details = TRUE) {
       last_author_location = NA_character_,
       primary_topic_display_name = NA_character_,
       primary_topic_id = NA_character_,
+      funding_funders_openalex = NA_character_,
+      funding_funder_ids_openalex = NA_character_,
+      funding_award_ids_openalex = NA_character_,
+      funding_funders_crossref = NA_character_,
+      funding_funder_ids_crossref = NA_character_,
+      funding_award_ids_crossref = NA_character_,
+      coi_crossref = NA_character_,
       stringsAsFactors = FALSE
     )
     empty$primary_topic <- I(list(NULL))
     return(empty)
   }
-
+  
+  # --- basic/journal metadata via OpenAlex work object ---
   basic <- get_basic_metadata(work)
   sjr <- get_journal_sjr(basic$issn_all, basic$year)
   top_factor <- get_top_factor(basic$journal, basic$issn_primary)
-
+  
+  # --- location details ---
   article_location <- get_article_location_details(work)
   first_author_location <- get_first_author_location_details(work)
   last_author_location <- get_last_author_location_details(work)
-
+  
   article_country <- location_country(article_location)
   first_author_country <- location_country(first_author_location)
   last_author_country <- location_country(last_author_location)
-
+  
   article_label <- format_location_label(article_location)
   first_author_label <- format_location_label(first_author_location)
   last_author_label <- format_location_label(last_author_location)
-
+  
+  # -------------------- Extract OpenAlex funding -----------------------
+  # REDUNDANT > openalex uses crossref, crossref output seems more complete
+  # only relevant if we want to use the open alex ids for funders
+  oa_f <- get_openalex_funding(work)
+  funding_funders_openalex <- if (length(oa_f$funders) > 0) paste(oa_f$funders, collapse = " || ") else NA_character_
+  funding_funder_ids_openalex <- if (length(oa_f$funder_ids) > 0) paste(oa_f$funder_ids, collapse = " || ") else NA_character_
+  funding_award_ids_openalex <- if (length(oa_f$award_ids) > 0) paste(oa_f$award_ids, collapse = " || ") else NA_character_
+  # funding_grants_openalex <- oa_f$grants %||% NULL # raw info
+  
+  # -------------------- Attempt Crossref and extract funding & COI & abstract--------------
+  cr_msg <- fetch_crossref_work(doi, email = OA_USER_AGENT)
+  if (!is.null(cr_msg)) {
+    # existing crossref extractor (keeps previous behavior)
+    cr_f <- get_crossref_funding(cr_msg)
+    funding_funders_crossref <- if (length(cr_f$funders) > 0) paste(cr_f$funders, collapse = " || ") else NA_character_
+    funding_funder_ids_crossref <- if (length(cr_f$funder_ids) > 0) paste(cr_f$funder_ids, collapse = " || ") else NA_character_
+    funding_award_ids_crossref <- if (length(cr_f$award_ids) > 0) paste(cr_f$award_ids, collapse = " || ") else NA_character_
+    coi_crossref <- get_crossref_coi(cr_msg)
+    # funding_grants_crossref <- cr_f$raw %||% NULL
+    # FIXME abstract needed or already in data?
+    cr_abstract = if (!is.null(cr_msg$abstract)) cr_msg$abstract else NA_character_
+  } else {
+    funding_funders_crossref <- NA_character_
+    funding_funder_ids_crossref <- NA_character_
+    funding_award_ids_crossref <- NA_character_
+    coi_crossref <- NA_character_
+    # funding_grants_crossref <- NULL
+    cr_abstract = NA_character_
+  }
+  # -------------------------------------------------------------------------
+  
+  # --- assemble record (text columns) ---
   record <- data.frame(
     doi = doi,
     year = basic$year,
@@ -362,28 +518,44 @@ extract_doi_metadata <- function(doi, return_location_details = TRUE) {
     last_author_location = last_author_country,
     primary_topic_display_name = work$primary_topic$display_name %||% NA_character_,
     primary_topic_id = work$primary_topic$id %||% NA_character_,
+    # OpenAlex columns
+    funding_funders_openalex = funding_funders_openalex,
+    funding_funder_ids_openalex = funding_funder_ids_openalex,
+    funding_award_ids_openalex = funding_award_ids_openalex,
+    # Crossref columns
+    funding_funders_crossref = funding_funders_crossref,
+    funding_funder_ids_crossref = funding_funder_ids_crossref,
+    funding_award_ids_crossref = funding_award_ids_crossref,
+    coi_crossref = coi_crossref,
+    cr_abstract = cr_abstract,
     stringsAsFactors = FALSE
   )
+  
+  # keep structured objects in list-columns
   record$primary_topic <- I(list(work$primary_topic %||% NULL))
-
+  record$article_location_label <- article_label
+  record$first_author_location_label <- first_author_label
+  record$last_author_location_label <- last_author_label
+  
+  # add raw grants as list-columns (preserve structure via R list-column)
+  # record$funding_grants_openalex <- I(list(funding_grants_openalex))
+  # record$funding_grants_crossref <- I(list(funding_grants_crossref))
+  
+  # append full location detail columns if requested
   if (return_location_details) {
-    record$article_location_label <- article_label
-    record$first_author_location_label <- first_author_label
-    record$last_author_location_label <- last_author_label
-
     if (is.null(article_location)) article_location <- empty_location()
     if (is.null(first_author_location)) first_author_location <- empty_location()
     if (is.null(last_author_location)) last_author_location <- empty_location()
-
+    
     record <- append_location_columns(record, "article_location_detail", article_location)
     record <- append_location_columns(record, "first_author_location_detail", first_author_location)
     record <- append_location_columns(record, "last_author_location_detail", last_author_location)
   }
-
+  
   record
 }
 
-process_dois <- function(dois, return_location_details = TRUE) {
+process_dois <- function(dois, return_location_details = TRUE, output_file = NULL) {
   results <- lapply(dois, function(doi) {
     tryCatch(
       extract_doi_metadata(doi, return_location_details = return_location_details),
@@ -401,6 +573,13 @@ process_dois <- function(dois, return_location_details = TRUE) {
           last_author_location = NA_character_,
           primary_topic_display_name = NA_character_,
           primary_topic_id = NA_character_,
+          funding_funders_openalex = NA_character_,
+          funding_funder_ids_openalex = NA_character_,
+          funding_award_ids_openalex = NA_character_,
+          funding_funders_crossref = NA_character_,
+          funding_funder_ids_crossref = NA_character_,
+          funding_award_ids_crossref = NA_character_,
+          coi_crossref = NA_character_,
           stringsAsFactors = FALSE
         )
         fallback$primary_topic <- I(list(NULL))
@@ -408,5 +587,23 @@ process_dois <- function(dois, return_location_details = TRUE) {
       }
     )
   })
-  bind_rows(results)
+  
+  df <- bind_rows(results)
+  
+  # optionally write to disk: CSV (text columns) + RDS (preserve list-columns)
+  if (!is.null(output_file) && nzchar(output_file)) {
+    outdir <- dirname(output_file)
+    if (!dir.exists(outdir) && outdir != ".") dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+    tryCatch({
+      # write CSV (list-columns will be coerced to string; RDS preserves them)
+      write.csv(df, file = output_file, row.names = FALSE, na = "")
+      rds_path <- sub("\\.csv$", ".rds", output_file)
+      saveRDS(df, file = rds_path)
+      message("Wrote results to: ", output_file, " and ", rds_path)
+    }, error = function(e) {
+      warning("Failed to write output file: ", e$message)
+    })
+  }
+  
+  df
 }
