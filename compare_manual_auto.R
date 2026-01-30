@@ -30,7 +30,7 @@ comb = full_join(
   by = "doi"
 )
 
-write.csv(comb, "auto-and-manual-combined.csv", row.names = FALSE)
+write.csv(comb, "data/auto-and-manual-combined.csv", row.names = FALSE)
 
 ## compare manual to auto coding
 
