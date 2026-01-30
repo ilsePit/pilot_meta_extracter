@@ -1,11 +1,10 @@
 # combine automated and manual coding
 library(stringr)
 
-
 ## read manual coding file
 manual = read.csv("data/2025-12-09_Codingform_ PilotingAssessment_pilot.csv")
 
-# make clean doi column
+# make clean doi column, remove .org inclusion
 manual <- manual %>%
   mutate(
     doi = X1.2..Article.DOI |> 
@@ -22,7 +21,7 @@ dois = unique(dois)
 # extract automated coding
 source("extract_doi_metadata.R")
 
-auto <- process_dois(dois, return_location_details = FALSE)
+auto <- process_dois(dois, return_location_details = TRUE)
 
 # combine files 
 comb = full_join(
@@ -32,6 +31,8 @@ comb = full_join(
 )
 
 write.csv(comb, "auto-and-manual-combined.csv", row.names = FALSE)
+
+## compare manual to auto coding
 
 ## remove test rows and select only manually confirmed relevant studies
 comb = comb %>%
