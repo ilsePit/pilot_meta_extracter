@@ -1,0 +1,68 @@
+{
+  "cluster_id": "psychology",
+  "cluster_label": "Psychology",
+  "version": "psychology-fields-v1.1",
+  "fields": [
+    {
+      "id": "psychology_general",
+      "label": "Psychology (General)",
+      "description": "Catch-all for psychology articles that do not fit clearly into any specific subfield, or that span multiple psychological areas without a clear primary focus.",
+      "exclusions": ["Use this as last resort when no single subfield dominates", "Prefer specific fields when possible"]
+    },
+    {
+      "id": "cognitive_psychology",
+      "label": "Cognitive Psychology",
+      "description": "Perception, attention, memory, learning, reasoning, language, problem-solving, JDM (heuristics, biases)",
+      "exclusions": ["Economic framing → Behavioural/Experimental Economics", "Social interaction focus → Social Psychology"]
+    },
+    {
+      "id": "social_psychology",
+      "label": "Social Psychology",
+      "description": "Attitudes, persuasion, social influence, stereotypes, prejudice, group dynamics, social identity, social cognition, close relationships",
+      "exclusions": ["Workplace focus where org is main focus → Occupational Psychology", "Clinical focus → Clinical Psychology"]
+    },
+    {
+      "id": "clinical_psychology",
+      "label": "Clinical Psychology, Diagnostics & Psychotherapy",
+      "description": "Psychopathology, diagnosis, assessment, psychotherapy, mental health treatment, counselling",
+      "exclusions": ["Workplace functioning focus → Occupational Psychology", "Neurobiological mechanisms only → Biological/Neuropsychology"]
+    },
+    {
+      "id": "developmental_psychology",
+      "label": "Developmental Psychology",
+      "description": "Development across lifespan, childhood/adolescence, cognitive/social/emotional/moral development",
+      "exclusions": ["Teaching methods focus → Educational Psychology", "Adult career development → Occupational Psychology"]
+    },
+    {
+      "id": "biological_neuropsychology",
+      "label": "Biological & Neuropsychology",
+      "description": "Brain imaging, psychophysiology, neuropsychological assessment, behavioural genetics, evolutionary psychology",
+      "exclusions": ["Clinical diagnosis/treatment → Clinical Psychology", "Basic neural mechanisms only → Biology"]
+    },
+    {
+      "id": "educational_psychology",
+      "label": "Educational Psychology",
+      "description": "Learning, instruction, motivation in educational settings, academic achievement, self-regulated learning",
+      "exclusions": ["Education policy/systems → Education cluster", "General cognitive experiments → Cognitive Psychology"]
+    },
+    {
+      "id": "occupational_organisational_business_psychology",
+      "label": "Occupational, Organisational & Business Psychology",
+      "description": "Work/org-specific constructs: leadership, burnout, job satisfaction, team performance, HR practices, safety climate",
+      "positive_criteria": ["Must study work/org-specific constructs", "Theoretical claims about work/organisations"],
+      "exclusions": ["Workplace as convenient setting → classify by theory domain", "Contact/prejudice reduction → Social Psychology", "Stereotype threat in interviews → Social Psychology"]
+    },
+    {
+      "id": "differential_personality_diagnostics",
+      "label": "Differential & Personality Psychology and Diagnostics",
+      "description": "Individual differences, personality traits, temperament, intelligence, psychological assessment",
+      "exclusions": ["Clinical diagnostic tools → Clinical Psychology", "Occupational tests → Occupational Psychology"]
+    },
+    {
+      "id": "methods_evaluation_psychology",
+      "label": "Methods & Evaluation in Psychology",
+      "description": "Research methods, measurement models, psychometrics, program evaluation, statistical methods",
+      "exclusions": ["Methods in other discipline → that discipline", "General statistics only → Statistics cluster"]
+    }
+  ]
+}
