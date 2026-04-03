@@ -29,7 +29,12 @@ dois = unique(dois)
 # extract automated coding
 source("extract_doi_metadata.R")
 
-auto <- process_dois(dois, return_location_details = TRUE)
+auto_databases <- process_dois(dois, return_location_details = TRUE)
+
+# add meta check coding, more extensive!
+# fixme add through csv for now, needs TEIs
+auto_metacheck = fixme
+
 
 # combine files 
 comb = full_join(
