@@ -30,27 +30,21 @@ Directly parses the TEI XML with targeted XPath queries and regex heading/body m
 
 ## Validation
 
-Validated against manual coding from `data/2026-04-03_Codingform_PilotingAssessment_pilot2.csv` (179 DOIs matched to TEI files out of 185).
+Validated against manual coding from `data/2026-04-03_Codingform_PilotingAssessment_pilot2.csv` (181 DOIs matched to TEI files out of 185). Of the 185 coded articles, only 84 had manual funding/COI ground truth — the remaining 101 were determined by coders to not contain a relevant pilot study, so the funding/COI questions were skipped.
 
-### Detection performance (against manual coding as ground truth)
+### Detection performance (against 81 articles with manual ground truth)
 
 |  | Accuracy | Precision | Recall | F1 |
 |---|---|---|---|---|
-| **Funding — Metacheck** | 0.553 | 0.452 | 0.910 | 0.604 |
-| **Funding — Regex** | **0.587** | **0.475** | **1.000** | **0.644** |
-| **COI — Metacheck** | 0.587 | 0.469 | 0.909 | 0.619 |
-| **COI — Regex** | **0.592** | **0.473** | **0.924** | **0.626** |
+| **Funding — Regex** | 0.963 | 0.957 | 1.000 | 0.978 |
+| **COI — Regex** | 0.926 | 0.984 | 0.924 | 0.953 |
 
-Low precision is largely due to manual coding errors — the majority of "false positives" are legitimate statements the manual coders missed.
+### Error breakdown
 
-### After correcting proposed manual coding errors
-
-| | True FPs | Proposed manual errors | TEI misses (GROBID failures) |
-|---|---|---|---|
-| **Funding** | 3 (2.1%) | 71 | 0 |
-| **COI** | 1 (0.8%) | 67 | 5 |
-
-**Corrected false positive rate**: Funding 2.1%, COI 0.8%.
+| | True FPs | TEI misses (GROBID failures) |
+|---|---|---|
+| **Funding** | 3 (3.7%) | 0 |
+| **COI** | 1 (1.2%) | 5 |
 
 The 3 funding FPs are: OA-fee-only acknowledgments (2 cases) and a CRediT author contributions section containing the word "funding" (1 case). The 1 COI FP is a paper where GROBID extracted the COI heading but lost the statement text. The 5 COI TEI misses are papers where GROBID failed to extract the COI statement from the PDF entirely.
 
@@ -71,7 +65,7 @@ The 3 funding FPs are: OA-fee-only acknowledgments (2 cases) and a CRediT author
 | `extract_tei_coi_funding.R` | Production extraction script (metacheck + regex) |
 | `scratch_dev_extract.R` | Development/validation script with comparison metrics |
 | `data/tei_coi_funding_extracted.csv` | Extraction results (output of production script) |
-| `data/proposed_manual_coding_errors.csv` | 89 DOIs with mismatches, assessed as manual errors, true FPs, or TEI misses |
+| `data/extraction_mismatches.csv` | 7 DOIs with mismatches (among articles with manual ground truth), assessed as true FPs or TEI misses |
 | `data/scratch_dev_results.csv` | Full results with manual ground truth (output of dev script) |
 
 ## Requirements
