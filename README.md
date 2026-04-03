@@ -17,7 +17,7 @@ For each DOI, `process_dois()` returns:
 - Optional detailed columns for each location (`return_location_details = TRUE`), including institution name, type, city, region, latitude, longitude, and data source
 - Funding information from both OpenAlex and Crossref:
   - `funding_funders_openalex` / `funding_funders_crossref` – funder names (separated by ` || `)
-  - `funding_funder_ids_openalex` / `funding_funder_ids_crossref` – funder identifiers (ROR IDs or DOIs)
+  - `funding_funder_ids_openalex` / `funding_funder_ids_crossref` – funder identifiers (OpenAlex IDs and DOIs)
   - `funding_award_ids_openalex` / `funding_award_ids_crossref` – grant/award numbers
 - Conflict of interest (COI) statement extracted from Crossref metadata (`coi_crossref`)
 - Abstract text from Crossref metadata (`cr_abstract`)
