@@ -31,19 +31,33 @@ source("extract_doi_metadata.R")
 
 auto_databases <- process_dois(dois, return_location_details = TRUE)
 
-# add meta check coding, more extensive!
+# add meta check-inspired coding using TEIs
+# created using extract_tei_coi_funding.R
 # fixme add through csv for now, needs TEIs
-auto_metacheck = fixme
+# only done for pilot2
+auto_tei = read.csv("data/tei_coi_funding_extracted.csv")
 
 
 # combine files 
-comb = full_join(
-  auto, 
-  manual,
-  by = "doi"
-)
+comb = 
+  manual %>%
+  full_join(
+    auto_databases, 
+    by = "doi"
+    ) %>%
+  full_join(
+    auto_tei,
+    by = "doi"
+  )
 
-write.csv(comb, "data/2026-04-03_auto-and-manual-combined.csv", row.names = FALSE)
+write.csv(comb, "data/2026-04-03_auto-and-manual-combined_pilot1-and-pilot2.csv", row.names = FALSE)
+
+comb_pilot2 = 
+  comb %>%
+  filter(coding == "pilot2") %>%
+  select(where(~ !all(is.na(.))))
+  
+write.csv(comb_pilot2, "data/2026-04-03_auto-and-manual-combined_pilot2.csv", row.names = FALSE)
 
 ## compare manual to auto coding
 
