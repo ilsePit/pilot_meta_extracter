@@ -62,7 +62,7 @@ write.csv(comb_pilot2, "data/2026-04-03_auto-and-manual-combined_pilot2.csv", ro
 ## compare manual to auto coding
 
 ## remove test rows and select only manually confirmed relevant studies
-comb = comb %>%
+comb = comb_pilot2 %>% # fixme or comb if interested in both
   filter(doi != "test") %>%
   # rough selection
   filter(str_detect(X1.3..Is.there.a.statement.in.the.article.that.there.was.a.pilot.study.conducted.,
@@ -112,7 +112,8 @@ comb_coi =
 comb_coi <- comb_coi %>%
   mutate(
     auto_extracted = if_any(starts_with("coi"), ~ 
-                              !is.na(.) & str_trim(.) != "" & !str_to_lower(.) %in% c("na", "n/a")
+                              !is.na(.) & str_trim(.) != "" & !str_to_lower(.) %in% c("na", "n/a")|
+                              if_any(starts_with("rx_coi"), ~ !is.na(.))
     ),
     manual_extracted_content_available = !is.na(.data[["X8.2.1..If.there.is.a.conflict.of.interest.statement..what.is.the.statement."]]) &
       str_trim(.data[["X8.2.1..If.there.is.a.conflict.of.interest.statement..what.is.the.statement."]]) != "" &
